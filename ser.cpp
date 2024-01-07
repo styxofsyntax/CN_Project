@@ -143,7 +143,7 @@ public:
 
                     // Store files in a vector
                     pdata.files = vector<string>(tokens.begin() + 4, tokens.end());
-
+                    pdata.ip = inet_ntoa(c_addr.sin_addr);
                     peers.insert(make_pair(username, pdata));
                     printPeers();
                 }
@@ -152,6 +152,13 @@ public:
                     string users = getAllUsernames();
                     cout << "Users: " << users << "\n\n";
                     send(connfd, users.c_str(), users.size(), 0);
+                }
+                else if (tokens.size() == 2 && tokens[0] == "GET_P")
+                {
+                    peer_data pdata = peers[tokens[1]];
+                    cout << "IP: " << pdata.ip << "Port: " << pdata.port << "\n\n";
+                    string data = pdata.ip + ", " + to_string(pdata.port);
+                    send(connfd, data.c_str(), data.size(), 0);
                 }
                 else
                 {

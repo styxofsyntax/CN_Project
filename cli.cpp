@@ -56,6 +56,29 @@ private:
 		cin >> port;
 	}
 
+	int serverConnect()
+	{
+		int fd = socket(AF_INET, SOCK_STREAM, 0);
+		if (fd == -1)
+		{
+			perror("Socket creation failed : ");
+			exit(-1);
+		}
+
+		struct sockaddr_in s_addr;
+		s_addr.sin_family = AF_INET;
+		s_addr.sin_port = htons(SERVER_PORT);
+		inet_aton(SERVER_IP, &s_addr.sin_addr);
+
+		if (connect(fd, (struct sockaddr *)&s_addr, sizeof(s_addr)) == -1)
+		{
+			perror("Connect failed on socket : ");
+			exit(-1);
+		}
+
+		return fd;
+	}
+
 public:
 	string username;
 	int port;
@@ -72,25 +95,9 @@ public:
 		this->port = port;
 	}
 
-	void serverConnect()
+	void serverRegister()
 	{
-		int fd = socket(AF_INET, SOCK_STREAM, 0);
-		if (fd == -1)
-		{
-			perror("Socket creation failed : ");
-			exit(-1);
-		}
-
-		struct sockaddr_in s_addr;
-		s_addr.sin_family = AF_INET;
-		s_addr.sin_port = htons(SERVER_PORT);
-		inet_aton(SERVER_IP, &s_addr.sin_addr);
-
-		if (connect(fd, (struct sockaddr *)&s_addr, sizeof(s_addr)) == -1)
-		{
-			perror("Connect failed on socket : ");
-			exit(-1);
-		}
+		int fd = serverConnect();
 
 		if (!fetchFiles())
 		{
@@ -103,30 +110,38 @@ public:
 
 		string data = "INIT," + username + ',' + dir + ',' + to_string(this->port) + ',' + filesToString();
 		send(fd, data.c_str(), data.size(), 0);
-		cout << "Registered with server!\n";
+		cout << "Registered with server!\n\n";
 
+		close(fd);
+	}
+
+	string fetchPeerData(string p_username)
+	{
+		int fd = serverConnect();
+
+		if (!fetchFiles())
+		{
+			perror("File fetching failed : ");
+			exit(-1);
+		}
+
+		char buffer[1000];
+		bzero(buffer, sizeof(buffer));
+
+		string data = "GET_P," + p_username;
+		send(fd, data.c_str(), data.size(), 0);
+		cout << "Requested for data of " << p_username << "!\n";
+
+		if (recv(fd, buffer, 1000, 0) > 0)
+			cout << "Peer data: " << buffer << "\n\n";
+
+		return buffer;
 		close(fd);
 	}
 
 	string fetchUsernames()
 	{
-		int fd = socket(AF_INET, SOCK_STREAM, 0);
-		if (fd == -1)
-		{
-			perror("Socket creation failed : ");
-			exit(-1);
-		}
-
-		struct sockaddr_in s_addr;
-		s_addr.sin_family = AF_INET;
-		s_addr.sin_port = htons(SERVER_PORT);
-		inet_aton(SERVER_IP, &s_addr.sin_addr);
-
-		if (connect(fd, (struct sockaddr *)&s_addr, sizeof(s_addr)) == -1)
-		{
-			perror("Connect failed on socket : ");
-			exit(-1);
-		}
+		int fd = serverConnect();
 
 		char users[1000];
 		bzero(users, sizeof(users));
@@ -136,8 +151,9 @@ public:
 		cout << "Requested for usernames!\n";
 
 		if (recv(fd, users, 1000, 0) > 0)
-			cout << "Usernames: " << users << "\n";
+			cout << "Usernames: " << users << "\n\n";
 
+		close(fd);
 		return users;
 	}
 
@@ -183,10 +199,14 @@ public:
 int main()
 {
 	Client c1("hello", "../../Desktop", 12);
-	c1.serverConnect();
+	c1.serverRegister();
 	c1.fetchUsernames();
-	// Client c2("hey", ".", 44);
-	// c2.serverConnect(SERVER_IP, SERVER_PORT);
+
+	Client c2("hey", ".", 44);
+	c2.serverRegister();
+	c2.fetchUsernames();
+
+	c2.fetchPeerData("hello");
 
 	//  pthread_t handler;
 	//   pthread_create(&handler, NULL, recvFromServer, (void *)server_fd);
