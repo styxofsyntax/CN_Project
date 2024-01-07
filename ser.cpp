@@ -57,6 +57,7 @@ int main()
     struct sockaddr_in c_addr;
     socklen_t cliaddr_len = sizeof(c_addr);
     pthread_t handler;
+    cout << "Starting Server...\n\n";
 
     while (1)
     {
@@ -93,7 +94,7 @@ void *recvFromClient(void *arg)
     {
         if (recv(connfd, buffer, 1000, 0) > 0)
         {
-            cout << "Received : {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
+            cout << "\n---Received--- \nSource: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
 
             istringstream ss(buffer);
             string token;
@@ -115,15 +116,15 @@ void *recvFromClient(void *arg)
                 vector<string> files(tokens.begin() + 4, tokens.end());
 
                 // Display the extracted values
-                cout << "Username: " << username << endl;
-                cout << "Directory: " << dir << endl;
-                cout << "Port: " << port << endl;
-                cout << "Files: ";
+                cout << "Data: {\n\tUsername: " << username << endl;
+                cout << "\tDirectory: " << dir << endl;
+                cout << "\tPort: " << port << endl;
+                cout << "\tFiles: ";
                 for (const auto &file : files)
                 {
-                    cout << file << " ";
+                    cout << file << ", ";
                 }
-                cout << endl;
+                cout << "\n}\n\n";
             }
             else
             {
@@ -137,6 +138,7 @@ void *recvFromClient(void *arg)
             break;
         }
     }
+    return NULL;
 }
 
 void *sendToClient(void *arg)
@@ -145,7 +147,7 @@ void *sendToClient(void *arg)
     struct sockaddr_in c_addr = c_ctx->c_addr;
     int connfd = c_ctx->connfd;
 
-    char *greet = "Greetings\n";
+    const char *greet = "Greetings\n";
 
     send(connfd, greet, strlen(greet), 0);
 
@@ -160,4 +162,6 @@ void *sendToClient(void *arg)
             break;
         }
     }
+
+    return NULL;
 }

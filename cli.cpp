@@ -152,11 +152,11 @@ int main()
 	// int server_fd = connect_server(SERVER_PORT);
 	//  client_registeration(server_fd);
 
-	Client c1("hello", "../../Documents", 12);
+	Client c1("hello", "../../Desktop", 12);
 	c1.serverConnect(SERVER_IP, SERVER_PORT);
 
-	Client c2("hey", ".", 44);
-	c2.serverConnect(SERVER_IP, SERVER_PORT);
+	// Client c2("hey", ".", 44);
+	// c2.serverConnect(SERVER_IP, SERVER_PORT);
 
 	//  pthread_t handler;
 	//   pthread_create(&handler, NULL, recvFromServer, (void *)server_fd);
@@ -194,6 +194,8 @@ void *recvFromServer(void *arg)
 			break;
 		}
 	}
+
+	return NULL;
 }
 
 void *sendToServer(void *arg)
@@ -207,4 +209,6 @@ void *sendToServer(void *arg)
 		cin.getline(buffer, 1000);
 		send(fd, buffer, strlen(buffer), 0);
 	}
+
+	return NULL;
 }
