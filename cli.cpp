@@ -34,7 +34,7 @@ private:
 	string dir;
 	vector<string> files;
 
-	bool input_data()
+	void input_data()
 	{
 		cout << "Username: ";
 		getline(cin, username);

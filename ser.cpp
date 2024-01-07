@@ -9,7 +9,8 @@
 #include <arpa/inet.h>
 
 #include <unistd.h>
-#include <pthread.h>
+// #include <pthread.h>
+#include <thread>
 
 #include <vector>
 #include <sstream>
@@ -17,128 +18,177 @@
 
 using namespace std;
 
+#define SERVER_PORT = 80;
+
 struct client_ctx
 {
     int connfd;
     sockaddr_in c_addr;
 };
 
+struct peer_data
+{
+    string dir, ip;
+    int port;
+    vector<string> files;
+};
+
 void *recvFromClient(void *);
 void *sendToClient(void *);
 
-int main()
+class Server
 {
+private:
+    int port, fd;
+    map<string, peer_data> peers;
 
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd == -1)
+public:
+    Server(int port)
     {
-        perror("Socket creation failed : ");
-        exit(-1);
+        this->port = port;
     }
 
-    struct sockaddr_in s_addr;
-    s_addr.sin_addr.s_addr = INADDR_ANY;
-    s_addr.sin_family = AF_INET;
-    s_addr.sin_port = htons(80);
-
-    if (bind(fd, (struct sockaddr *)(&s_addr), sizeof(s_addr)) == -1)
+    void start()
     {
-        perror("Bind failed on socket : ");
-        exit(-1);
-    }
-
-    int backlog = 4;
-    if (listen(fd, backlog) == -1)
-    {
-        perror("listen failed on socket : ");
-        exit(-1);
-    }
-
-    struct sockaddr_in c_addr;
-    socklen_t cliaddr_len = sizeof(c_addr);
-    pthread_t handler;
-    cout << "Starting Server...\n\n";
-
-    while (1)
-    {
-        int connfd = accept(fd, (struct sockaddr *)&c_addr, &cliaddr_len);
-        if (connfd < 0)
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd == -1)
         {
-            perror("accept failed on socket : ");
+            perror("Socket creation failed : ");
             exit(-1);
         }
-        else
+
+        struct sockaddr_in s_addr;
+        s_addr.sin_addr.s_addr = INADDR_ANY;
+        s_addr.sin_family = AF_INET;
+        s_addr.sin_port = htons(80);
+
+        if (bind(fd, (struct sockaddr *)(&s_addr), sizeof(s_addr)) == -1)
         {
-            client_ctx c_ctx;
-            c_ctx.connfd = connfd;
-            c_ctx.c_addr = c_addr;
-
-            // pthread_create(&handler, NULL, sendToClient, &c_ctx);
-            pthread_create(&handler, NULL, recvFromClient, &c_ctx);
-
-            cout << "Connection: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
+            perror("Bind failed on socket : ");
+            exit(-1);
         }
-    }
-    return 0;
-}
 
-void *recvFromClient(void *arg)
-{
-    client_ctx *c_ctx = (client_ctx *)arg;
-    struct sockaddr_in c_addr = c_ctx->c_addr;
-    int connfd = c_ctx->connfd;
-
-    char buffer[1000];
-
-    while (1)
-    {
-        if (recv(connfd, buffer, 1000, 0) > 0)
+        int backlog = 4;
+        if (listen(fd, backlog) == -1)
         {
-            cout << "\n---Received--- \nSource: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
+            perror("listen failed on socket : ");
+            exit(-1);
+        }
 
-            istringstream ss(buffer);
-            string token;
-            vector<string> tokens;
-            while (getline(ss, token, ','))
+        cout << "Server started!\n\n";
+
+        thread acceptThread([this, fd]()
+                            { this->invokeAccept(fd); });
+        acceptThread.detach();
+    }
+
+    void invokeAccept(int fd)
+    {
+        struct sockaddr_in c_addr;
+        socklen_t cliaddr_len = sizeof(c_addr);
+
+        while (1)
+        {
+            int connfd = accept(fd, (struct sockaddr *)&c_addr, &cliaddr_len);
+            if (connfd < 0)
             {
-                tokens.push_back(token);
-            }
-
-            // Check if the message type is INIT
-            if (tokens.size() >= 4 && tokens[0] == "INIT")
-            {
-                // Extract the values
-                string username = tokens[1];
-                string dir = tokens[2];
-                int port = stoi(tokens[3]);
-
-                // Store files in a vector
-                vector<string> files(tokens.begin() + 4, tokens.end());
-
-                // Display the extracted values
-                cout << "Data: {\n\tUsername: " << username << endl;
-                cout << "\tDirectory: " << dir << endl;
-                cout << "\tPort: " << port << endl;
-                cout << "\tFiles: ";
-                for (const auto &file : files)
-                {
-                    cout << file << ", ";
-                }
-                cout << "\n}\n\n";
+                perror("accept failed on socket : ");
+                exit(-1);
             }
             else
             {
-                cout << "Invalid message type" << endl;
+                client_ctx c_ctx;
+                c_ctx.connfd = connfd;
+                c_ctx.c_addr = c_addr;
+
+                thread recvThread([this, c_ctx]()
+                                  { this->recvFromClient(c_ctx); });
+                recvThread.detach();
+
+                cout << "Connection: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
             }
         }
-        else
+    }
+
+    void recvFromClient(client_ctx c_ctx)
+    {
+        struct sockaddr_in c_addr = c_ctx.c_addr;
+        int connfd = c_ctx.connfd;
+
+        char buffer[1000];
+
+        while (1)
         {
-            cout << "Disconnected: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
-            close(connfd);
-            break;
+            if (recv(connfd, buffer, 1000, 0) > 0)
+            {
+                cout << "\n---Received--- \nSource: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
+
+                istringstream ss(buffer);
+                string token;
+                vector<string> tokens;
+                while (getline(ss, token, ','))
+                {
+                    tokens.push_back(token);
+                }
+
+                // Check if the message type is INIT
+                if (tokens.size() >= 4 && tokens[0] == "INIT")
+                {
+                    // Extract the values
+                    peer_data pdata;
+                    string username = tokens[1];
+                    pdata.dir = tokens[2];
+                    pdata.port = stoi(tokens[3]);
+
+                    // Store files in a vector
+                    pdata.files = vector<string>(tokens.begin() + 4, tokens.end());
+
+                    peers.insert(make_pair(username, pdata));
+                    printPeers();
+                }
+                else
+                {
+                    cout << "Invalid message type" << endl;
+                }
+            }
+            else
+            {
+                cout << "Disconnected: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
+                close(connfd);
+                break;
+            }
         }
     }
-    return NULL;
+
+    void printPeers()
+    {
+        for (const auto &entry : peers)
+        {
+            const std::string &username = entry.first;
+            const peer_data &pdata = entry.second;
+            cout << "Data: {\n\tUsername: " << username << endl;
+            cout << "\tDirectory: " << pdata.dir << endl;
+            cout << "\tPort: " << pdata.port << endl;
+            cout << "\tFiles: ";
+            for (const auto &file : pdata.files)
+            {
+                cout << file << ", ";
+            }
+            cout << "\n}\n\n";
+            std::cout << std::endl;
+        }
+    }
+};
+
+int main()
+{
+    Server s1(80);
+    s1.start();
+
+    while (1)
+    {
+    }
+    return 0;
 }
 
 void *sendToClient(void *arg)
