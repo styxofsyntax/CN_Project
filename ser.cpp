@@ -157,7 +157,7 @@ public:
                 {
                     peer_data pdata = peers[tokens[1]];
                     cout << "IP: " << pdata.ip << "Port: " << pdata.port << "\n\n";
-                    string data = pdata.ip + ", " + to_string(pdata.port);
+                    string data = pdata.ip + "," + to_string(pdata.port);
                     send(connfd, data.c_str(), data.size(), 0);
                 }
                 else
