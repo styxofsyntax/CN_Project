@@ -72,7 +72,7 @@ public:
 		this->port = port;
 	}
 
-	void serverConnect(string server_ip, int server_port)
+	void serverConnect()
 	{
 		int fd = socket(AF_INET, SOCK_STREAM, 0);
 		if (fd == -1)
@@ -83,8 +83,8 @@ public:
 
 		struct sockaddr_in s_addr;
 		s_addr.sin_family = AF_INET;
-		s_addr.sin_port = htons(server_port);
-		inet_aton(server_ip.c_str(), &s_addr.sin_addr);
+		s_addr.sin_port = htons(SERVER_PORT);
+		inet_aton(SERVER_IP, &s_addr.sin_addr);
 
 		if (connect(fd, (struct sockaddr *)&s_addr, sizeof(s_addr)) == -1)
 		{
@@ -106,6 +106,39 @@ public:
 		cout << "Registered with server!\n";
 
 		close(fd);
+	}
+
+	string fetchUsernames()
+	{
+		int fd = socket(AF_INET, SOCK_STREAM, 0);
+		if (fd == -1)
+		{
+			perror("Socket creation failed : ");
+			exit(-1);
+		}
+
+		struct sockaddr_in s_addr;
+		s_addr.sin_family = AF_INET;
+		s_addr.sin_port = htons(SERVER_PORT);
+		inet_aton(SERVER_IP, &s_addr.sin_addr);
+
+		if (connect(fd, (struct sockaddr *)&s_addr, sizeof(s_addr)) == -1)
+		{
+			perror("Connect failed on socket : ");
+			exit(-1);
+		}
+
+		char users[1000];
+		bzero(users, sizeof(users));
+
+		string data = "GET_U";
+		send(fd, data.c_str(), data.size(), 0);
+		cout << "Requested for usernames!\n";
+
+		if (recv(fd, users, 1000, 0) > 0)
+			cout << "Usernames: " << users << "\n";
+
+		return users;
 	}
 
 	void updateFiles(const vector<string> &files)
@@ -149,12 +182,9 @@ public:
 
 int main()
 {
-	// int server_fd = connect_server(SERVER_PORT);
-	//  client_registeration(server_fd);
-
 	Client c1("hello", "../../Desktop", 12);
-	c1.serverConnect(SERVER_IP, SERVER_PORT);
-
+	c1.serverConnect();
+	c1.fetchUsernames();
 	// Client c2("hey", ".", 44);
 	// c2.serverConnect(SERVER_IP, SERVER_PORT);
 

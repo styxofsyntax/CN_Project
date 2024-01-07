@@ -33,7 +33,6 @@ struct peer_data
     vector<string> files;
 };
 
-void *recvFromClient(void *);
 void *sendToClient(void *);
 
 class Server
@@ -119,6 +118,7 @@ public:
 
         while (1)
         {
+            bzero(buffer, sizeof(buffer));
             if (recv(connfd, buffer, 1000, 0) > 0)
             {
                 cout << "\n---Received--- \nSource: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
@@ -132,6 +132,7 @@ public:
                 }
 
                 // Check if the message type is INIT
+                cout << "Request: " << tokens[0] << '\n';
                 if (tokens.size() >= 4 && tokens[0] == "INIT")
                 {
                     // Extract the values
@@ -145,6 +146,12 @@ public:
 
                     peers.insert(make_pair(username, pdata));
                     printPeers();
+                }
+                else if (tokens.size() == 1 && tokens[0] == "GET_U")
+                {
+                    string users = getAllUsernames();
+                    cout << "Users: " << users << "\n\n";
+                    send(connfd, users.c_str(), users.size(), 0);
                 }
                 else
                 {
@@ -178,13 +185,31 @@ public:
             std::cout << std::endl;
         }
     }
+
+    string getAllUsernames()
+    {
+        string result;
+
+        for (const auto &pair : peers)
+        {
+            result += pair.first + ", ";
+        }
+
+        // Remove the trailing comma and space if there are any usernames
+        if (!result.empty())
+        {
+            result.pop_back(); // Remove the last comma
+            result.pop_back(); // Remove the last space
+        }
+
+        return result;
+    }
 };
 
 int main()
 {
     Server s1(80);
     s1.start();
-
     while (1)
     {
     }
