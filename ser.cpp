@@ -11,7 +11,9 @@
 #include <unistd.h>
 #include <pthread.h>
 
-#include "common.cpp"
+#include <vector>
+#include <sstream>
+#include <map>
 
 using namespace std;
 
@@ -85,14 +87,48 @@ void *recvFromClient(void *arg)
     struct sockaddr_in c_addr = c_ctx->c_addr;
     int connfd = c_ctx->connfd;
 
-    client_data c_data;
+    char buffer[1000];
 
     while (1)
     {
-        if (recv(connfd, (char *)&c_data, sizeof(client_data), 0) > 0)
+        if (recv(connfd, buffer, 1000, 0) > 0)
         {
             cout << "Received : {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
-            cout << "Username: " << c_data.username << "\nPort: " << c_data.port << "\nDirectory: " << c_data.dir << '\n';
+
+            istringstream ss(buffer);
+            string token;
+            vector<string> tokens;
+            while (getline(ss, token, ','))
+            {
+                tokens.push_back(token);
+            }
+
+            // Check if the message type is INIT
+            if (tokens.size() >= 4 && tokens[0] == "INIT")
+            {
+                // Extract the values
+                string username = tokens[1];
+                string dir = tokens[2];
+                int port = stoi(tokens[3]);
+
+                // Store files in a vector
+                vector<string> files(tokens.begin() + 4, tokens.end());
+
+                // Display the extracted values
+                cout << "Username: " << username << endl;
+                cout << "Directory: " << dir << endl;
+                cout << "Port: " << port << endl;
+                cout << "Files: ";
+                for (const auto &file : files)
+                {
+                    cout << file << " ";
+                }
+                cout << endl;
+            }
+            else
+            {
+                cout << "Invalid message type" << endl;
+            }
         }
         else
         {
