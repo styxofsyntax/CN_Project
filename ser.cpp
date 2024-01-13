@@ -33,6 +33,7 @@ struct peer_data
     vector<string> files;
 };
 
+string vectorToString(const vector<string> &);
 void *sendToClient(void *);
 
 class Server
@@ -137,33 +138,43 @@ public:
                 {
                     // Extract the values
                     peer_data pdata;
-                    string username = tokens[1];
+                    string data, username = tokens[1];
                     pdata.dir = tokens[2];
                     pdata.port = stoi(tokens[3]);
 
                     // Store files in a vector
                     pdata.files = vector<string>(tokens.begin() + 4, tokens.end());
                     pdata.ip = inet_ntoa(c_addr.sin_addr);
-                    peers.insert(make_pair(username, pdata));
-                    printPeers();
-                }
-                else if (tokens.size() == 1 && tokens[0] == "GET_U")
-                {
-                    string users = getAllUsernames();
-                    cout << "Users: " << users << "\n\n";
-                    send(connfd, users.c_str(), users.size(), 0);
-                }
-                else if (tokens.size() == 2 && tokens[0] == "GET_P")
-                {
-                    peer_data pdata = peers[tokens[1]];
-                    cout << "IP: " << pdata.ip << "Port: " << pdata.port << "\n\n";
-                    string data = pdata.ip + "," + to_string(pdata.port);
+
+                    // If username is not present in database
+                    if (peers.find(username) == peers.end())
+                    {
+                        peers.insert(make_pair(username, pdata));
+                        data = "OK";
+                    }
+                    else
+                        data = "ERR,Username Already Exists!";
+
                     send(connfd, data.c_str(), data.size(), 0);
+                    printPeers();
+
+                    return;
                 }
+
+                string data;
+                if (tokens.size() == 1 && tokens[0] == "GET_U")
+                    data = getAllUsernames();
+                else if (tokens.size() == 2 && tokens[0] == "GET_P")
+                    data = getPeerData(tokens[1]);
+                else if (tokens.size() == 1 && tokens[0] == "GET_AF")
+                    data = getAllFilenames();
+                else if (tokens.size() == 2 && tokens[0] == "GET_UF")
+                    data = getUserFilenames(tokens[1]);
                 else
-                {
-                    cout << "Invalid message type" << endl;
-                }
+                    data = "ERR,Invalid Request!";
+
+                cout << "Sent Data: " << data << endl;
+                send(connfd, data.c_str(), data.size(), 0);
             }
             else
             {
@@ -193,6 +204,22 @@ public:
         }
     }
 
+    string registerUser(string username, peer_data pdata)
+    {
+        if (peers.find(username) == peers.end())
+            return "ERR,User not found!";
+        peers.insert(make_pair(username, pdata));
+        return "OK";
+    }
+    string getPeerData(string username)
+    {
+        if (peers.find(username) == peers.end())
+            return "ERR,User not found!";
+
+        peer_data pdata = peers[username];
+        return "OK," + pdata.ip + "," + to_string(pdata.port);
+    }
+
     string getAllUsernames()
     {
         string result;
@@ -209,7 +236,31 @@ public:
             result.pop_back(); // Remove the last space
         }
 
-        return result;
+        return "OK," + result;
+    }
+
+    string getAllFilenames()
+    {
+        string result;
+
+        for (const auto &pair : peers)
+        {
+            result += pair.first + "," + vectorToString(pair.second.files) + '\n';
+        }
+
+        if (!result.empty())
+        {
+            result.pop_back();
+        }
+
+        return "OK," + result;
+    }
+
+    string getUserFilenames(string username)
+    {
+        if (peers.find(username) == peers.end())
+            return "ERR,User not found!";
+        return "OK," + vectorToString(peers[username].files);
     }
 };
 
@@ -221,6 +272,15 @@ int main()
     {
     }
     return 0;
+}
+
+string vectorToString(const vector<string> &files)
+{
+    string result = "";
+    for (const auto &element : files)
+        result += element + ",";
+
+    return result;
 }
 
 void *sendToClient(void *arg)

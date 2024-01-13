@@ -27,8 +27,7 @@ using namespace std;
 void printVector(const vector<string> &);
 void *recvFromServer(void *);
 void *sendToServer(void *);
-int connect_server(int);
-bool client_registeration(int);
+vector<string> stringToTokens(string);
 
 class Client
 {
@@ -115,7 +114,24 @@ public:
 
 		string data = "INIT," + username + ',' + dir + ',' + to_string(this->port) + ',' + filesToString();
 		send(fd, data.c_str(), data.size(), 0);
-		cout << "Registered with server!\n\n";
+
+		char buffer[1000];
+		bzero(buffer, sizeof(buffer));
+
+		if (recv(fd, buffer, 1000, 0) > 0)
+		{
+			vector<string> tokens = stringToTokens(buffer);
+
+			if (strcmp(buffer, "OK") == 0)
+				cout << "Registered with server!\n\n";
+			else if (tokens.size() == 2 && tokens[0] == "ERR")
+			{
+				cout << tokens[1] << endl;
+				exit(-1);
+			}
+			else
+				cout << buffer << endl;
+		}
 
 		close(fd);
 	}
@@ -123,12 +139,6 @@ public:
 	string fetchPeerData(string p_username)
 	{
 		int fd = serverConnect();
-
-		if (!fetchFiles())
-		{
-			perror("File fetching failed : ");
-			exit(-1);
-		}
 
 		char buffer[1000];
 		bzero(buffer, sizeof(buffer));
@@ -156,7 +166,9 @@ public:
 		cout << "Requested for usernames!\n";
 
 		if (recv(fd, users, 1000, 0) > 0)
+		{
 			cout << "Usernames: " << users << "\n\n";
+		}
 
 		close(fd);
 		return users;
@@ -195,24 +207,20 @@ public:
 		return true;
 	}
 
+	void fetchFilenamesFromServer()
+	{
+		int fd = serverConnect();
+		string data = "GET_AF";
+		send(fd, data.c_str(), data.size(), 0);
+	}
+
 	vector<string> getFiles()
 	{
 		return files;
 	}
 
-	void peerConnect(string username)
+	int peerConnect(string p_ip, int p_port)
 	{
-		string data = fetchPeerData(username);
-
-		istringstream ss(data);
-		string token;
-		vector<string> tokens;
-		while (getline(ss, token, ','))
-			tokens.push_back(token);
-
-		string p_ip = tokens[0];
-		int p_port = stoi(tokens[1]);
-
 		int fd = socket(AF_INET, SOCK_STREAM, 0);
 		if (fd == -1)
 		{
@@ -230,12 +238,34 @@ public:
 			perror("Connect failed on socket : ");
 			exit(-1);
 		}
+		return fd;
+	}
+
+	void peerChat(string username)
+	{
+		string data = fetchPeerData(username);
+		vector<string> tokens = stringToTokens(data);
+
+		if (tokens[0] == "ERR")
+		{
+			cout << "ERROR: " << tokens[1] << endl;
+			return;
+		}
+
+		string p_ip = tokens[1];
+		int p_port = stoi(tokens[2]);
+
+		int fd = peerConnect(p_ip, p_port);
+
 		chatSession = true;
 
 		thread sendPeerThread([this, fd]()
-							  { this->sendToPeer(fd); });
+							  { this->sendChatToPeer(fd); });
 		thread recvThread([this, fd]()
-						  { this->recvFromPeer(fd); });
+						  { this->recvChatFromPeer(fd); });
+
+		string flag = "CHAT";
+		send(fd, flag.c_str(), flag.size(), 0);
 
 		recvThread.join();
 		sendPeerThread.join();
@@ -302,19 +332,36 @@ public:
 				cout << "Connection: {ip: " << inet_ntoa(p_addr.sin_addr) << " port: " << ntohs(p_addr.sin_port) << "}\n";
 				chatSession = true;
 
-				thread recvThread([this, connfd]()
-								  { this->recvFromPeer(connfd); });
-				thread sendPeerThread([this, connfd]()
-									  { this->sendToPeer(connfd); });
-				recvThread.join();
-				sendPeerThread.join();
+				char buffer[1000];
 
-				cout << "Chat session closed!\n";
+				bzero(buffer, sizeof(buffer));
+
+				if (recv(connfd, buffer, 1000, 0) > 0)
+				{
+					vector<string> tokens = stringToTokens(buffer);
+
+					if (tokens[0] == "CHAT")
+					{
+						thread recvChatThread([this, connfd]()
+											  { this->recvChatFromPeer(connfd); });
+						thread sendChatThread([this, connfd]()
+											  { this->sendChatToPeer(connfd); });
+						recvChatThread.join();
+						sendChatThread.join();
+						cout << "Chat session closed!\n";
+					}
+					else if (tokens[0] == "FILE")
+					{
+						// thread sendFileThread([this, connfd]()
+						// 					  { this->sendFleToPeer(connfd); });
+						// sendFileThread.join();
+					}
+				}
 			}
 		}
 	}
 
-	void recvFromPeer(int connfd)
+	void recvChatFromPeer(int connfd)
 	{
 		char buffer[1000];
 
@@ -334,7 +381,7 @@ public:
 		close(connfd);
 	}
 
-	void sendToPeer(int connfd)
+	void sendChatToPeer(int connfd)
 	{
 		char buffer[1000];
 
@@ -352,7 +399,7 @@ public:
 
 			send(connfd, buffer, strlen(buffer), 0);
 		}
-		close(connfd);
+		shutdown(connfd, 2);
 	}
 };
 
@@ -376,8 +423,14 @@ int main()
 		c2.serverRegister();
 		c2.fetchUsernames();
 		// c2.fetchPeerData("hello");
-
-		c2.peerConnect("hello");
+		// c2.fetchFilenamesFromServer();
+		c2.peerChat("hello");
+	}
+	else if (op == 3)
+	{
+		Client c3("fer", ".", 55);
+		c3.serverRegister();
+		c3.peerChat("hello");
 	}
 
 	while (1)
@@ -395,46 +448,22 @@ int main()
 	return 0;
 }
 
+vector<string> stringToTokens(string str)
+{
+	istringstream ss(str);
+	string token;
+	vector<string> tokens;
+	while (getline(ss, token, ','))
+	{
+		tokens.push_back(token);
+	}
+	return tokens;
+}
+
 void printVector(const vector<string> &files)
 {
 	for (const auto &element : files)
 		cout << element << ", ";
 
 	cout << '\n';
-}
-
-void *recvFromServer(void *arg)
-{
-	int64_t fd = (int64_t)arg;
-	char buffer[1000];
-
-	while (1)
-	{
-		bzero(buffer, sizeof(buffer));
-		if (recv(fd, buffer, 1000, 0) > 0)
-		{
-			cout << "from server: " << buffer << "\n";
-		}
-		else
-		{
-			break;
-		}
-	}
-
-	return NULL;
-}
-
-void *sendToServer(void *arg)
-{
-	int64_t fd = (int64_t)arg;
-	char buffer[1000];
-
-	while (1)
-	{
-		cout << "Enter Message : ";
-		cin.getline(buffer, 1000);
-		send(fd, buffer, strlen(buffer), 0);
-	}
-
-	return NULL;
 }
