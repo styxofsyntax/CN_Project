@@ -118,18 +118,26 @@ void Server::recvFromClient(client_ctx c_ctx)
                 pdata.ip = inet_ntoa(c_addr.sin_addr);
 
                 // If username is not present in database
+                peers[username] = pdata;
                 if (peers.find(username) == peers.end())
-                {
-                    peers.insert(make_pair(username, pdata));
-                    data = "OK";
-                }
+                    data = "OK"; // user registered
                 else
-                    data = "ERR,Username Already Exists!";
+                    data = "UP"; // data updated
 
                 send(connfd, data.c_str(), data.size(), 0);
                 printPeers();
 
                 continue;
+            }
+            else if (tokens.size() == 2 && tokens[0] == "EXIT")
+            {
+                string exitUsername = tokens[1];
+                auto it = peers.find(exitUsername);
+                if (it != peers.end())
+                {
+                    peers.erase(it);
+                    cout << "Username " << exitUsername << " removed.\n\n";
+                }
             }
 
             string data;

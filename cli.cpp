@@ -15,6 +15,7 @@
 #include <thread>
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 
 #include "cli.h"
 
@@ -118,6 +119,8 @@ bool Client::serverRegister()
 
         if (strcmp(buffer, "OK") == 0)
             cout << "Registered with server!\n\n";
+        else if (strcmp(buffer, "UP") == 0)
+            cout << "Filenames updated on server!\n\n";
         else if (tokens.size() == 2 && tokens[0] == "ERR")
         {
             cout << tokens[1] << endl
@@ -132,6 +135,15 @@ bool Client::serverRegister()
 
     close(fd);
     return true;
+}
+
+void Client::serverExit()
+{
+    int fd = serverConnect();
+
+    string data = "EXIT," + username;
+    send(fd, data.c_str(), data.size(), 0);
+    shutdown(fd, 2);
 }
 
 string Client::fetchPeerData(string p_username)
@@ -359,7 +371,6 @@ void Client::invokeAccept(int fd)
     while (1)
     {
         int connfd = accept(fd, (struct sockaddr *)&p_addr, &paddr_len);
-        cout << "Enter 9 to accept the chat request! (5 secs)\n";
 
         if (connfd < 0)
         {
@@ -379,6 +390,7 @@ void Client::invokeAccept(int fd)
 
                 if (tokens[0] == "CHAT")
                 {
+                    cout << "Enter 9 to accept the chat request! (5 secs)\n";
                     chatSession = true;
                     auto startTime = std::chrono::steady_clock::now();
                     do
@@ -421,13 +433,72 @@ void Client::invokeAccept(int fd)
                 }
                 else if (tokens[0] == "FILE")
                 {
-                    // thread sendFileThread([this, connfd]()
-                    // 					  { this->sendFleToPeer(connfd); });
-                    // sendFileThread.join();
+                    thread sendFileThread([this, connfd, tokens]()
+                                          { this->sendFileToPeer(connfd, tokens[1]); });
+                    sendFileThread.detach();
                 }
             }
         }
     }
+}
+
+void Client::recvFileFromPeer(string username, string filename)
+{
+    string data = fetchPeerData(username);
+    vector<string> tokens = stringToTokens(data);
+
+    if (tokens[0] == "ERR")
+    {
+        cout << "ERROR: " << tokens[1] << endl;
+        return;
+    }
+
+    string p_ip = tokens[1];
+    int p_port = stoi(tokens[2]);
+
+    int fd = peerConnect(p_ip, p_port);
+
+    if (fd < 0)
+        return;
+
+    char buffer[1000];
+    ofstream outputFile(dir + '/' + filename, ios::binary);
+
+    string flag = "FILE," + filename;
+    send(fd, flag.c_str(), flag.size(), 0);
+
+    ssize_t bytesRead;
+    while ((bytesRead = recv(fd, buffer, 1000, 0)) > 0)
+    {
+        outputFile.write(buffer, bytesRead);
+    }
+
+    close(fd);
+    outputFile.close();
+    cout << "File received successfully.\n\n";
+}
+
+void Client::sendFileToPeer(int connfd, string filename)
+{
+    ifstream inputFile(dir + '/' + filename, ios::binary);
+    if (!inputFile.is_open())
+    {
+        cout << "Error opening file\n\n";
+        shutdown(connfd, 2);
+        return;
+    }
+
+    char buffer[1000];
+    ssize_t bytesRead;
+    while ((bytesRead = inputFile.readsome(buffer, 1000)) > 0)
+    {
+        send(connfd, buffer, bytesRead, 0);
+    }
+
+    close(connfd);
+    inputFile.close();
+
+    cout << "File sent successfully.\n\n";
 }
 
 void Client::recvChatFromPeer(int connfd)

@@ -58,6 +58,7 @@ int main()
                 clientObj.blockUI = true; // toggle on to indicate backend we accept request
             break;
         case 0:
+            clientObj.serverExit();
             return 0;
         }
     }
@@ -125,8 +126,17 @@ void userSelect(Client &clientObj)
             std::cout << clientObj.fetchUserFilenamesFromServer(username) << "\n\n";
             break;
         case 3:
-        {
             clientObj.peerChat(username);
+            break;
+        case 4:
+        {
+            std::cin.ignore();
+            std::string filename;
+            std::cout << "Enter filename to fetch: ";
+            getline(std::cin, filename);
+
+            clientObj.recvFileFromPeer(username, filename);
+            clientObj.serverRegister();
             break;
         }
         case 9:

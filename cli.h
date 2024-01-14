@@ -32,6 +32,7 @@ public:
     Client();
     Client(std::string username, std::string dir, int port);
     bool serverRegister();
+    void serverExit();
     std::string fetchPeerData(std::string p_username);
     std::vector<std::string> fetchUsernames();
     bool usernameAvail(std::string username);
@@ -46,6 +47,8 @@ public:
     void peerChat(std::string username);
     bool startChatServer();
     void invokeAccept(int fd);
+    void sendFileToPeer(int connfd, std::string filename);
+    void recvFileFromPeer(std::string username, std::string filename);
     void recvChatFromPeer(int connfd);
     void sendChatToPeer(int connfd);
 };
