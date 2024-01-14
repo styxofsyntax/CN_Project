@@ -2,267 +2,235 @@
 #include <stdlib.h>
 #include <iostream>
 #include <string.h>
-
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
-
 #include <unistd.h>
-// #include <pthread.h>
 #include <thread>
-
-#include <vector>
 #include <sstream>
-#include <map>
+#include "ser.h"
 
 using namespace std;
 
-#define SERVER_PORT = 80;
-
-struct client_ctx
+Server::Server(int port)
 {
-    int connfd;
-    sockaddr_in c_addr;
-};
+    this->port = port;
+}
 
-struct peer_data
+void Server::start()
 {
-    string dir, ip;
-    int port;
-    vector<string> files;
-};
-
-string vectorToString(const vector<string> &);
-void *sendToClient(void *);
-
-class Server
-{
-private:
-    int port, fd;
-    map<string, peer_data> peers;
-
-public:
-    Server(int port)
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd == -1)
     {
-        this->port = port;
+        perror("Socket creation failed : ");
+        exit(-1);
     }
 
-    void start()
+    struct sockaddr_in s_addr;
+    s_addr.sin_addr.s_addr = INADDR_ANY;
+    s_addr.sin_family = AF_INET;
+    s_addr.sin_port = htons(80);
+
+    if (bind(fd, (struct sockaddr *)(&s_addr), sizeof(s_addr)) == -1)
     {
-        int fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (fd == -1)
-        {
-            perror("Socket creation failed : ");
-            exit(-1);
-        }
-
-        struct sockaddr_in s_addr;
-        s_addr.sin_addr.s_addr = INADDR_ANY;
-        s_addr.sin_family = AF_INET;
-        s_addr.sin_port = htons(80);
-
-        if (bind(fd, (struct sockaddr *)(&s_addr), sizeof(s_addr)) == -1)
-        {
-            perror("Bind failed on socket : ");
-            exit(-1);
-        }
-
-        int backlog = 4;
-        if (listen(fd, backlog) == -1)
-        {
-            perror("listen failed on socket : ");
-            exit(-1);
-        }
-
-        cout << "Server started!\n\n";
-
-        thread acceptThread([this, fd]()
-                            { this->invokeAccept(fd); });
-        acceptThread.detach();
+        perror("Bind failed on socket : ");
+        exit(-1);
     }
 
-    void invokeAccept(int fd)
+    int backlog = 4;
+    if (listen(fd, backlog) == -1)
     {
-        struct sockaddr_in c_addr;
-        socklen_t cliaddr_len = sizeof(c_addr);
+        perror("listen failed on socket : ");
+        exit(-1);
+    }
 
-        while (1)
+    cout << "Server started!\n\n";
+
+    thread acceptThread([this, fd]()
+                        { this->invokeAccept(fd); });
+    acceptThread.detach();
+}
+
+void Server::invokeAccept(int fd)
+{
+    struct sockaddr_in c_addr;
+    socklen_t cliaddr_len = sizeof(c_addr);
+
+    while (1)
+    {
+        int connfd = accept(fd, (struct sockaddr *)&c_addr, &cliaddr_len);
+        if (connfd < 0)
         {
-            int connfd = accept(fd, (struct sockaddr *)&c_addr, &cliaddr_len);
-            if (connfd < 0)
+            perror("accept failed on socket : ");
+            exit(-1);
+        }
+        else
+        {
+            client_ctx c_ctx;
+            c_ctx.connfd = connfd;
+            c_ctx.c_addr = c_addr;
+
+            thread recvThread([this, c_ctx]()
+                              { this->recvFromClient(c_ctx); });
+            recvThread.detach();
+
+            cout << "Connection: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
+        }
+    }
+}
+
+void Server::recvFromClient(client_ctx c_ctx)
+{
+    struct sockaddr_in c_addr = c_ctx.c_addr;
+    int connfd = c_ctx.connfd;
+
+    char buffer[1000];
+
+    while (1)
+    {
+        bzero(buffer, sizeof(buffer));
+        if (recv(connfd, buffer, 1000, 0) > 0)
+        {
+            cout << "\n---Received--- \nSource: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
+
+            istringstream ss(buffer);
+            string token;
+            vector<string> tokens;
+            while (getline(ss, token, ','))
             {
-                perror("accept failed on socket : ");
-                exit(-1);
+                tokens.push_back(token);
             }
-            else
+
+            // Check if the message type is INIT
+            cout << "Request: " << tokens[0] << '\n';
+            if (tokens.size() >= 4 && tokens[0] == "INIT")
             {
-                client_ctx c_ctx;
-                c_ctx.connfd = connfd;
-                c_ctx.c_addr = c_addr;
+                // Extract the values
+                peer_data pdata;
+                string data, username = tokens[1];
+                pdata.dir = tokens[2];
+                pdata.port = stoi(tokens[3]);
 
-                thread recvThread([this, c_ctx]()
-                                  { this->recvFromClient(c_ctx); });
-                recvThread.detach();
+                // Store files in a vector
+                pdata.files = vector<string>(tokens.begin() + 4, tokens.end());
+                pdata.ip = inet_ntoa(c_addr.sin_addr);
 
-                cout << "Connection: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
-            }
-        }
-    }
-
-    void recvFromClient(client_ctx c_ctx)
-    {
-        struct sockaddr_in c_addr = c_ctx.c_addr;
-        int connfd = c_ctx.connfd;
-
-        char buffer[1000];
-
-        while (1)
-        {
-            bzero(buffer, sizeof(buffer));
-            if (recv(connfd, buffer, 1000, 0) > 0)
-            {
-                cout << "\n---Received--- \nSource: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
-
-                istringstream ss(buffer);
-                string token;
-                vector<string> tokens;
-                while (getline(ss, token, ','))
+                // If username is not present in database
+                if (peers.find(username) == peers.end())
                 {
-                    tokens.push_back(token);
+                    peers.insert(make_pair(username, pdata));
+                    data = "OK";
                 }
-
-                // Check if the message type is INIT
-                cout << "Request: " << tokens[0] << '\n';
-                if (tokens.size() >= 4 && tokens[0] == "INIT")
-                {
-                    // Extract the values
-                    peer_data pdata;
-                    string data, username = tokens[1];
-                    pdata.dir = tokens[2];
-                    pdata.port = stoi(tokens[3]);
-
-                    // Store files in a vector
-                    pdata.files = vector<string>(tokens.begin() + 4, tokens.end());
-                    pdata.ip = inet_ntoa(c_addr.sin_addr);
-
-                    // If username is not present in database
-                    if (peers.find(username) == peers.end())
-                    {
-                        peers.insert(make_pair(username, pdata));
-                        data = "OK";
-                    }
-                    else
-                        data = "ERR,Username Already Exists!";
-
-                    send(connfd, data.c_str(), data.size(), 0);
-                    printPeers();
-
-                    return;
-                }
-
-                string data;
-                if (tokens.size() == 1 && tokens[0] == "GET_U")
-                    data = getAllUsernames();
-                else if (tokens.size() == 2 && tokens[0] == "GET_P")
-                    data = getPeerData(tokens[1]);
-                else if (tokens.size() == 1 && tokens[0] == "GET_AF")
-                    data = getAllFilenames();
-                else if (tokens.size() == 2 && tokens[0] == "GET_UF")
-                    data = getUserFilenames(tokens[1]);
                 else
-                    data = "ERR,Invalid Request!";
+                    data = "ERR,Username Already Exists!";
 
-                cout << "Sent Data: " << data << endl;
                 send(connfd, data.c_str(), data.size(), 0);
+                printPeers();
+
+                return;
             }
+
+            string data;
+            if (tokens.size() == 1 && tokens[0] == "GET_U")
+                data = getAllUsernames();
+            else if (tokens.size() == 2 && tokens[0] == "GET_P")
+                data = getPeerData(tokens[1]);
+            else if (tokens.size() == 1 && tokens[0] == "GET_AF")
+                data = getAllFilenames();
+            else if (tokens.size() == 2 && tokens[0] == "GET_UF")
+                data = getUserFilenames(tokens[1]);
             else
-            {
-                cout << "Disconnected: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
-                close(connfd);
-                break;
-            }
-        }
-    }
+                data = "ERR,Invalid Request!";
 
-    void printPeers()
-    {
-        for (const auto &entry : peers)
+            cout << "Sent Data: " << data << endl;
+            send(connfd, data.c_str(), data.size(), 0);
+        }
+        else
         {
-            const std::string &username = entry.first;
-            const peer_data &pdata = entry.second;
-            cout << "Data: {\n\tUsername: " << username << endl;
-            cout << "\tDirectory: " << pdata.dir << endl;
-            cout << "\tPort: " << pdata.port << endl;
-            cout << "\tFiles: ";
-            for (const auto &file : pdata.files)
-            {
-                cout << file << ", ";
-            }
-            cout << "\n}\n\n";
-            std::cout << std::endl;
+            cout << "Disconnected: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
+            close(connfd);
+            break;
         }
     }
+}
 
-    string registerUser(string username, peer_data pdata)
+void Server::printPeers()
+{
+    for (const auto &entry : peers)
     {
-        if (peers.find(username) == peers.end())
-            return "ERR,User not found!";
-        peers.insert(make_pair(username, pdata));
-        return "OK";
-    }
-    string getPeerData(string username)
-    {
-        if (peers.find(username) == peers.end())
-            return "ERR,User not found!";
-
-        peer_data pdata = peers[username];
-        return "OK," + pdata.ip + "," + to_string(pdata.port);
-    }
-
-    string getAllUsernames()
-    {
-        string result;
-
-        for (const auto &pair : peers)
+        const std::string &username = entry.first;
+        const peer_data &pdata = entry.second;
+        cout << "Data: {\n\tUsername: " << username << endl;
+        cout << "\tDirectory: " << pdata.dir << endl;
+        cout << "\tPort: " << pdata.port << endl;
+        cout << "\tFiles: ";
+        for (const auto &file : pdata.files)
         {
-            result += pair.first + ", ";
+            cout << file << ", ";
         }
-
-        // Remove the trailing comma and space if there are any usernames
-        if (!result.empty())
-        {
-            result.pop_back(); // Remove the last comma
-            result.pop_back(); // Remove the last space
-        }
-
-        return "OK," + result;
+        cout << "\n}\n\n";
+        std::cout << std::endl;
     }
+}
 
-    string getAllFilenames()
+string Server::registerUser(string username, peer_data pdata)
+{
+    if (peers.find(username) == peers.end())
+        return "ERR,User not found!";
+    peers.insert(make_pair(username, pdata));
+    return "OK";
+}
+string Server::getPeerData(string username)
+{
+    if (peers.find(username) == peers.end())
+        return "ERR,User not found!";
+
+    peer_data pdata = peers[username];
+    return "OK," + pdata.ip + "," + to_string(pdata.port);
+}
+
+string Server::getAllUsernames()
+{
+    string result;
+
+    for (const auto &pair : peers)
     {
-        string result;
-
-        for (const auto &pair : peers)
-        {
-            result += pair.first + "," + vectorToString(pair.second.files) + '\n';
-        }
-
-        if (!result.empty())
-        {
-            result.pop_back();
-        }
-
-        return "OK," + result;
+        result += pair.first + ", ";
     }
 
-    string getUserFilenames(string username)
+    // Remove the trailing comma and space if there are any usernames
+    if (!result.empty())
     {
-        if (peers.find(username) == peers.end())
-            return "ERR,User not found!";
-        return "OK," + vectorToString(peers[username].files);
+        result.pop_back(); // Remove the last comma
+        result.pop_back(); // Remove the last space
     }
-};
+
+    return "OK," + result;
+}
+
+string Server::getAllFilenames()
+{
+    string result;
+
+    for (const auto &pair : peers)
+    {
+        result += pair.first + "," + vectorToString(pair.second.files) + '\n';
+    }
+
+    if (!result.empty())
+    {
+        result.pop_back();
+    }
+
+    return "OK," + result;
+}
+
+string Server::getUserFilenames(string username)
+{
+    if (peers.find(username) == peers.end())
+        return "ERR,User not found!";
+    return "OK," + vectorToString(peers[username].files);
+}
 
 int main()
 {
@@ -281,29 +249,4 @@ string vectorToString(const vector<string> &files)
         result += element + ",";
 
     return result;
-}
-
-void *sendToClient(void *arg)
-{
-    client_ctx *c_ctx = (client_ctx *)arg;
-    struct sockaddr_in c_addr = c_ctx->c_addr;
-    int connfd = c_ctx->connfd;
-
-    const char *greet = "Greetings\n";
-
-    send(connfd, greet, strlen(greet), 0);
-
-    char buffer[1000];
-    while (1)
-    {
-        cout << "Enter message: ";
-        cin.getline(buffer, 1000);
-        if (send(connfd, buffer, strlen(buffer), 0) < 0)
-        {
-            cin.clear();
-            break;
-        }
-    }
-
-    return NULL;
 }
