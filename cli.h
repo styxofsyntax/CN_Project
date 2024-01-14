@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <atomic>
+#include <thread>
 
 void printVector(const std::vector<std::string> &);
 std::vector<std::string> stringToTokens(std::string);
@@ -18,7 +19,6 @@ class Client
 private:
     std::string dir;
     std::vector<std::string> files;
-    std::atomic<bool> chatSession;
 
     void input_data();
     int serverConnect();
@@ -26,21 +26,25 @@ private:
 public:
     std::string username;
     int port;
+    std::atomic<bool> chatSession;
+    std::atomic<bool> blockUI;
 
     Client();
     Client(std::string username, std::string dir, int port);
-    void serverRegister();
+    bool serverRegister();
     std::string fetchPeerData(std::string p_username);
-    std::string fetchUsernames();
+    std::vector<std::string> fetchUsernames();
+    bool usernameAvail(std::string username);
+    bool userExists(std::string name);
     void updateFiles(const std::vector<std::string> &files);
     std::string filesToString();
     bool fetchFiles();
-    void fetchFilenamesFromServer();
-    void fetchUserFilenamesFromServer(std::string username);
+    std::string fetchFilenamesFromServer();
+    std::string fetchUserFilenamesFromServer(std::string username);
     std::vector<std::string> getFiles();
     int peerConnect(std::string p_ip, int p_port);
     void peerChat(std::string username);
-    void start();
+    bool startChatServer();
     void invokeAccept(int fd);
     void recvChatFromPeer(int connfd);
     void sendChatToPeer(int connfd);

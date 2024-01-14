@@ -70,11 +70,13 @@ void Server::invokeAccept(int fd)
             c_ctx.connfd = connfd;
             c_ctx.c_addr = c_addr;
 
+            cout << ANSI_COLOR_GREEN << "Connection: {ip: " << inet_ntoa(c_addr.sin_addr)
+                 << " port: " << ntohs(c_addr.sin_port) << "}"
+                 << ANSI_COLOR_RESET << '\n';
+
             thread recvThread([this, c_ctx]()
                               { this->recvFromClient(c_ctx); });
             recvThread.detach();
-
-            cout << "Connection: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
         }
     }
 }
@@ -127,7 +129,7 @@ void Server::recvFromClient(client_ctx c_ctx)
                 send(connfd, data.c_str(), data.size(), 0);
                 printPeers();
 
-                return;
+                continue;
             }
 
             string data;
@@ -142,12 +144,14 @@ void Server::recvFromClient(client_ctx c_ctx)
             else
                 data = "ERR,Invalid Request!";
 
-            cout << "Sent Data: " << data << endl;
+            cout << "Sent Data: " << data << "\n\n";
             send(connfd, data.c_str(), data.size(), 0);
         }
         else
         {
-            cout << "Disconnected: {ip: " << inet_ntoa(c_addr.sin_addr) << " port: " << ntohs(c_addr.sin_port) << "}\n";
+            cout << ANSI_COLOR_RED << "Disconnected: {ip: " << inet_ntoa(c_addr.sin_addr)
+                 << " port: " << ntohs(c_addr.sin_port) << "}"
+                 << ANSI_COLOR_RESET << "\n\n";
             close(connfd);
             break;
         }
@@ -168,7 +172,7 @@ void Server::printPeers()
         {
             cout << file << ", ";
         }
-        cout << "\n}\n\n";
+        cout << "\n}\n";
         std::cout << std::endl;
     }
 }
@@ -195,15 +199,12 @@ string Server::getAllUsernames()
 
     for (const auto &pair : peers)
     {
-        result += pair.first + ", ";
+        result += pair.first + ",";
     }
 
     // Remove the trailing comma and space if there are any usernames
     if (!result.empty())
-    {
         result.pop_back(); // Remove the last comma
-        result.pop_back(); // Remove the last space
-    }
 
     return "OK," + result;
 }
@@ -214,7 +215,7 @@ string Server::getAllFilenames()
 
     for (const auto &pair : peers)
     {
-        result += pair.first + "," + vectorToString(pair.second.files) + '\n';
+        result += pair.first + ": " + vectorToString(pair.second.files) + '\n';
     }
 
     if (!result.empty())
@@ -222,14 +223,14 @@ string Server::getAllFilenames()
         result.pop_back();
     }
 
-    return "OK," + result;
+    return result;
 }
 
 string Server::getUserFilenames(string username)
 {
     if (peers.find(username) == peers.end())
         return "ERR,User not found!";
-    return "OK," + vectorToString(peers[username].files);
+    return vectorToString(peers[username].files);
 }
 
 int main()

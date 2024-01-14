@@ -9,27 +9,31 @@
 #include <arpa/inet.h>
 
 #include <unistd.h>
-#include <pthread.h>
 
 #include <filesystem>
 #include <numeric>
 #include <thread>
+#include <algorithm>
+#include <chrono>
 
 #include "cli.h"
-
-#define MIN_PORT 1
-#define MAX_PORT 65535
-#define SERVER_PORT 80
-#define SERVER_IP "127.0.0.1"
 
 using namespace std;
 
 void Client::input_data()
 {
-    cout << "Username: ";
-    getline(cin, username);
+    while (1)
+    {
+        cout << "Username: ";
+        getline(cin, username);
 
-    do
+        if (usernameAvail(username))
+            break;
+
+        cout << "Username already exists!\n";
+    }
+
+    while (1)
     {
         cout << "Enter a directory: ";
         getline(cin, dir);
@@ -39,11 +43,16 @@ void Client::input_data()
             break; // Exit the loop if a valid directory is entered
         else
             cout << "Invalid directory. Please try again.\n";
+    }
 
-    } while (true);
+    while (1)
+    {
+        cout << "Port: ";
+        cin >> port;
 
-    cout << "Port: ";
-    cin >> port;
+        if (startChatServer())
+            break;
+    }
 }
 
 int Client::serverConnect()
@@ -73,6 +82,7 @@ Client::Client()
 {
     input_data();
     chatSession = false;
+    blockUI = false;
 }
 
 Client::Client(string username, string dir, int port)
@@ -83,14 +93,14 @@ Client::Client(string username, string dir, int port)
     this->chatSession = false;
 }
 
-void Client::serverRegister()
+bool Client::serverRegister()
 {
     int fd = serverConnect();
 
     if (!fetchFiles())
     {
         perror("File fetching failed : ");
-        exit(-1);
+        return false;
     }
 
     cout << "Shared files: ";
@@ -110,15 +120,18 @@ void Client::serverRegister()
             cout << "Registered with server!\n\n";
         else if (tokens.size() == 2 && tokens[0] == "ERR")
         {
-            cout << tokens[1] << endl;
+            cout << tokens[1] << endl
+                 << endl;
             close(fd);
-            exit(-1);
+            return false;
         }
         else
-            cout << buffer << endl;
+            cout << buffer << endl
+                 << endl;
     }
 
     close(fd);
+    return true;
 }
 
 string Client::fetchPeerData(string p_username)
@@ -130,33 +143,47 @@ string Client::fetchPeerData(string p_username)
 
     string data = "GET_P," + p_username;
     send(fd, data.c_str(), data.size(), 0);
-    cout << "Requested for data of " << p_username << "!\n";
 
-    if (recv(fd, buffer, 1000, 0) > 0)
-        cout << "Peer data: " << buffer << "\n\n";
-
+    recv(fd, buffer, 1000, 0);
     close(fd);
     return buffer;
 }
 
-string Client::fetchUsernames()
+vector<string> Client::fetchUsernames()
 {
     int fd = serverConnect();
-
+    vector<string> tokens;
     char users[1000];
     bzero(users, sizeof(users));
 
     string data = "GET_U";
     send(fd, data.c_str(), data.size(), 0);
-    cout << "Requested for usernames!\n";
 
     if (recv(fd, users, 1000, 0) > 0)
     {
-        cout << "Usernames: " << users << "\n\n";
+        tokens = stringToTokens(users);
+        if (tokens[0] == "OK")
+            tokens.erase(tokens.begin()); // remove "OK" from vector
+        else
+            cout << "Unexpected Error!\n\n";
     }
-
     close(fd);
-    return users;
+    return tokens;
+}
+
+bool Client::usernameAvail(string name)
+{
+    if (name.find(',') != string::npos) // commas are not allowed in usernames as they are being used as delimeters
+        return false;
+
+    return !userExists(name);
+}
+
+bool Client::userExists(string name)
+{
+    vector<string> users = fetchUsernames();
+    auto it = find(users.begin(), users.end(), name);
+    return it != users.end();
 }
 
 void Client::updateFiles(const vector<string> &files)
@@ -176,6 +203,8 @@ string Client::filesToString()
 
 bool Client::fetchFiles()
 {
+    files.clear();
+
     try
     {
         for (const auto &entry : filesystem::directory_iterator(dir))
@@ -192,20 +221,32 @@ bool Client::fetchFiles()
     return true;
 }
 
-void Client::fetchFilenamesFromServer()
+string Client::fetchFilenamesFromServer()
 {
     int fd = serverConnect();
     string data = "GET_AF";
     send(fd, data.c_str(), data.size(), 0);
-    cout << data << '\n';
+
+    char buffer[1000];
+    bzero(buffer, sizeof(buffer));
+
+    recv(fd, buffer, 1000, 0);
+    close(fd);
+    return buffer;
 }
 
-void Client::fetchUserFilenamesFromServer(string username)
+string Client::fetchUserFilenamesFromServer(string username)
 {
     int fd = serverConnect();
-    string data = "GET_UF" + username;
+    string data = "GET_UF," + username;
     send(fd, data.c_str(), data.size(), 0);
-    cout << data << '\n';
+
+    char buffer[1000];
+    bzero(buffer, sizeof(buffer));
+
+    recv(fd, buffer, 1000, 0);
+    close(fd);
+    return buffer;
 }
 
 vector<string> Client::getFiles()
@@ -218,8 +259,8 @@ int Client::peerConnect(string p_ip, int p_port)
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd == -1)
     {
-        perror("Socket creation failed : ");
-        exit(-1);
+        perror("Socket creation failed : \n");
+        return -1;
     }
 
     struct sockaddr_in p_addr;
@@ -229,8 +270,9 @@ int Client::peerConnect(string p_ip, int p_port)
 
     if (connect(fd, (struct sockaddr *)&p_addr, sizeof(p_addr)) == -1)
     {
-        perror("Connect failed on socket : ");
-        exit(-1);
+        perror("Connect failed on socket : \n");
+        close(fd);
+        return -1;
     }
     return fd;
 }
@@ -251,6 +293,9 @@ void Client::peerChat(string username)
 
     int fd = peerConnect(p_ip, p_port);
 
+    if (fd < 0)
+        return;
+
     chatSession = true;
 
     thread sendPeerThread([this, fd]()
@@ -265,16 +310,16 @@ void Client::peerChat(string username)
     sendPeerThread.join();
     close(fd);
 
-    cout << "Chat session closed!\n";
+    cout << "Chat session closed!\n\n";
 }
 
-void Client::start()
+bool Client::startChatServer()
 {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd == -1)
     {
         perror("Socket creation failed : ");
-        exit(-1);
+        return false;
     }
 
     struct sockaddr_in c_addr;
@@ -287,21 +332,23 @@ void Client::start()
     if (bind(fd, (struct sockaddr *)(&c_addr), sizeof(c_addr)) == -1)
     {
         perror("Bind failed on socket : ");
-        exit(-1);
+        return false;
     }
 
     int backlog = 4;
     if (listen(fd, backlog) == -1)
     {
         perror("listen failed on socket : ");
-        exit(-1);
+        return false;
     }
 
-    cout << "Server started!\n\n";
+    cout << "Chat-Server started!\n\n";
 
     thread acceptThread([this, fd]()
                         { this->invokeAccept(fd); });
     acceptThread.detach();
+
+    return true;
 }
 
 void Client::invokeAccept(int fd)
@@ -312,15 +359,15 @@ void Client::invokeAccept(int fd)
     while (1)
     {
         int connfd = accept(fd, (struct sockaddr *)&p_addr, &paddr_len);
+        cout << "Enter 9 to accept the chat request! (5 secs)\n";
+
         if (connfd < 0)
         {
             perror("accept failed on socket : ");
-            exit(-1);
         }
         else
         {
             cout << "Connection: {ip: " << inet_ntoa(p_addr.sin_addr) << " port: " << ntohs(p_addr.sin_port) << "}\n";
-            chatSession = true;
 
             char buffer[1000];
 
@@ -332,13 +379,45 @@ void Client::invokeAccept(int fd)
 
                 if (tokens[0] == "CHAT")
                 {
-                    thread recvChatThread([this, connfd]()
-                                          { this->recvChatFromPeer(connfd); });
-                    thread sendChatThread([this, connfd]()
-                                          { this->sendChatToPeer(connfd); });
+                    chatSession = true;
+                    auto startTime = std::chrono::steady_clock::now();
+                    do
+                    {
+                        auto currentTime = std::chrono::steady_clock::now();
+                        auto elapsedTime = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
+
+                        if (elapsedTime >= 5)
+                        {
+                            std::cout << "Chat request denied.\n\n";
+                            shutdown(connfd, 2);
+                            break;
+                        }
+
+                        // Sleep for a short duration to avoid busy waiting
+                        this_thread::sleep_for(std::chrono::milliseconds(100));
+                    } while (!blockUI); // check if user toggles off the blockUI to indicate accept
+
+                    if (!blockUI) // if still off then decline
+                    {
+                        chatSession = false;
+                        continue; // declines the chat request
+                    }
+
+                    thread recvChatThread = thread([this, connfd]()
+                                                   { this->recvChatFromPeer(connfd); });
+                    thread sendChatThread = thread([this, connfd]()
+                                                   { this->sendChatToPeer(connfd); });
                     recvChatThread.join();
                     sendChatThread.join();
-                    cout << "Chat session closed!\n";
+                    try
+                    {
+                        close(connfd);
+                    }
+                    catch (exception e)
+                    {
+                    }
+                    cout << "Chat session closed!\n\n";
+                    blockUI = false;
                 }
                 else if (tokens[0] == "FILE")
                 {
@@ -360,24 +439,24 @@ void Client::recvChatFromPeer(int connfd)
         bzero(buffer, sizeof(buffer));
         if (recv(connfd, buffer, 1000, 0) > 0)
         {
-            cout << buffer << '\n';
+            cout << "Recieved: " << buffer << '\n';
         }
         else
         {
+            cout << "Peer disconnected. Enter anything to exit!\n\n";
             chatSession = false;
             break;
         }
     }
-    close(connfd);
 }
 
 void Client::sendChatToPeer(int connfd)
 {
     char buffer[1000];
 
+    cout << "Enter Message : ";
     while (chatSession)
     {
-        cout << "Enter Message : ";
         cin.getline(buffer, 1000);
 
         if (strcmp(buffer, "!exit") == 0)
@@ -387,45 +466,10 @@ void Client::sendChatToPeer(int connfd)
             break;
         }
 
-        send(connfd, buffer, strlen(buffer), 0);
+        if (send(connfd, buffer, strlen(buffer), 0) < 0)
+            break;
     }
     shutdown(connfd, 2);
-}
-
-int main()
-{
-
-    int op;
-    cout << "option: ";
-    cin >> op;
-    cin.ignore();
-    if (op == 1)
-    {
-        Client c1("hello", "../../Desktop", 12);
-        c1.serverRegister();
-        c1.start();
-        // c1.fetchUsernames();
-    }
-    else if (op == 2)
-    {
-        Client c2("hey", ".", 44);
-        c2.serverRegister();
-        c2.fetchUsernames();
-        // c2.fetchPeerData("hello");
-        // c2.fetchFilenamesFromServer();
-        c2.peerChat("hello");
-    }
-    else if (op == 3)
-    {
-        Client c3("fer", ".", 55);
-        c3.serverRegister();
-        c3.peerChat("hello");
-    }
-
-    while (1)
-    {
-    }
-    return 0;
 }
 
 vector<string> stringToTokens(string str)
@@ -440,9 +484,9 @@ vector<string> stringToTokens(string str)
     return tokens;
 }
 
-void printVector(const vector<string> &files)
+void printVector(const vector<string> &v)
 {
-    for (const auto &element : files)
+    for (const auto &element : v)
         cout << element << ", ";
 
     cout << '\n';
