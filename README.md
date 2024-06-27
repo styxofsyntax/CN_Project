@@ -95,7 +95,7 @@ Queries are client messages with a prefix indicating the operation. Server respo
 | View Users     | Display all online users                      |
 | Select User    | Prompt the user to enter a username to select |
 | View All Files | Show filenames of online users                |
-| Exit:          | Notify the server of disconnection            |
+| Exit           | Notify the server of disconnection            |
 
 <!-- prettier-ignore -->
 **Actions for Selected User**
